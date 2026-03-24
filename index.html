@@ -539,7 +539,7 @@ async function geocode(query) {
 // ── FETCH CHARGERS from Open Charge Map ──
 async function fetchChargers(lat, lng, radiusMiles) {
   const radiusKm = radiusMiles * 1.60934;
-  const url = `https://ev-charger-finder-worker.adrianrsinnott.workers.dev/?output=json&key=7a9d9862-1ec6-4c47-bb68-060d896311cb&latitude=${lat}&longitude=${lng}&distance=${radiusKm}&distanceunit=KM&maxresults=200&compact=true&verbose=false`;
+  const url = `https://ev-ocm-proxy.adrianrsinnott.workers.dev/?output=json&key=7a9d9862-1ec6-4c47-bb68-060d896311cb&latitude=${lat}&longitude=${lng}&distance=${radiusKm}&distanceunit=KM&maxresults=200&compact=true&verbose=false`;
   const res = await fetch(url, { referrerPolicy: 'no-referrer' });
   if (!res.ok) throw new Error('API error: ' + res.status);
   return await res.json();
