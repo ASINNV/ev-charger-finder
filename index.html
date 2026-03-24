@@ -445,6 +445,85 @@
     letter-spacing: 0.05em;
   }
   .net-chip.active { border-color: var(--accent); color: var(--accent); background: var(--accent-glow); }
+
+  .extra-filters {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .filter-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .filter-row label {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.65rem;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    white-space: nowrap;
+    min-width: 90px;
+  }
+
+  .filter-toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .filter-toggle input[type="checkbox"] {
+    accent-color: var(--accent);
+    width: 13px;
+    height: 13px;
+    cursor: pointer;
+  }
+
+  .filter-toggle span {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.68rem;
+    color: var(--text-dim);
+  }
+
+  .range-inputs {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex: 1;
+  }
+
+  .range-inputs input[type="number"] {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    color: var(--text);
+    font-family: 'DM Mono', monospace;
+    font-size: 0.72rem;
+    padding: 3px 6px;
+    width: 58px;
+    outline: none;
+  }
+  .range-inputs input[type="number"]:focus { border-color: var(--accent-dim); }
+  .range-inputs input[type="number"]:disabled { opacity: 0.35; }
+
+  .range-sep {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.65rem;
+    color: var(--muted);
+  }
+
+  .range-unit {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.65rem;
+    color: var(--muted);
+    white-space: nowrap;
+  }
 </style>
 </head>
 <body>
@@ -490,6 +569,28 @@
       <span class="count-badge" id="countBadge">—</span>
     </div>
     <div class="network-filter" id="networkFilter"></div>
+    <div class="extra-filters" id="extraFilters">
+      <div class="filter-row">
+        <label>kWh Price</label>
+        <label class="filter-toggle">
+          <input type="checkbox" id="requireKwh">
+          <span>Must have price listed</span>
+        </label>
+      </div>
+      <div class="filter-row">
+        <label>Parking $</label>
+        <label class="filter-toggle">
+          <input type="checkbox" id="filterParking">
+          <span>Limit range</span>
+        </label>
+        <div class="range-inputs">
+          <input type="number" id="parkMin" min="0" step="0.01" placeholder="min" disabled>
+          <span class="range-sep">–</span>
+          <input type="number" id="parkMax" min="0" step="0.01" placeholder="max" disabled>
+          <span class="range-unit">$/hr</span>
+        </div>
+      </div>
+    </div>
     <div class="charger-list" id="chargerList">
       <div class="empty-state">
         <div class="empty-icon">⚡</div>
@@ -516,6 +617,10 @@ let activeCard = null;
 let maxCents = 40;
 let selectedNetworks = new Set();
 let drawMode = false;
+let requireKwhPrice = false;
+let filterParkingEnabled = false;
+let parkMin = null;
+let parkMax = null;
 let drawnLayer = null;
 let drawnPolygon = null; // array of [lat,lng] for polygon filter
 let searchCircle = null;
@@ -727,15 +832,51 @@ function buildNetworkFilter(stations) {
 // ── FILTER + RENDER ──
 function renderFiltered() {
   filteredResults = allResults.filter(s => {
+    // Network filter
     if (!selectedNetworks.has(stationNetwork(s))) return false;
+
+    // kWh price filter
     const price = parsePrice(s);
-    if (price === null || price === 'text') return true;
-    return price <= maxCents;
+    if (requireKwhPrice && (price === null || price === 'text')) return false;
+    if (typeof price === 'number' && price > maxCents) return false;
+
+    // Parking cost filter
+    if (filterParkingEnabled) {
+      const pCost = parseParkingCost(s);
+      if (pCost === null) return false; // no parking info — hide
+      if (parkMin !== null && pCost < parkMin) return false;
+      if (parkMax !== null && pCost > parkMax) return false;
+    }
+
+    return true;
   });
 
   document.getElementById('countBadge').textContent = filteredResults.length;
   renderList(filteredResults);
   renderMarkers(filteredResults);
+}
+
+// Parse a numeric parking cost ($/hr or flat) from NREL data
+function parseParkingCost(station) {
+  const raw = (station.ev_pricing || '') + ' ' + (station.ev_pricing_session || '');
+  if (!raw.trim()) return null;
+  const lower = raw.toLowerCase();
+  if (lower.includes('free') || lower.includes('no cost') || lower.includes('no charge')) return 0;
+  // Look for $X/hr, $X per hour, $X.XX parking
+  const patterns = [
+    /\$\s*([\d.]+)\s*(?:\/|per)\s*h(?:ou)?r/i,
+    /([\d.]+)\s*(?:\/|per)\s*h(?:ou)?r/i,
+    /park(?:ing)?[^\d$]*\$?([\d.]+)/i,
+    /\$([\d.]+)\s*(?:flat|session)/i,
+  ];
+  for (const pat of patterns) {
+    const m = raw.match(pat);
+    if (m) {
+      const val = parseFloat(m[1]);
+      if (val >= 0 && val < 100) return val;
+    }
+  }
+  return null;
 }
 
 // ── RENDER LIST ──
@@ -822,7 +963,7 @@ function selectStation(s, card) {
   document.querySelectorAll('.charger-card').forEach(c => c.classList.remove('active'));
   if (card) { card.classList.add('active'); card.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }
   const lat = stationLat(s), lng = stationLng(s);
-  if (lat && lng) map.setView([lat, lng], 16);
+  if (lat && lng) map.panTo([lat, lng]);
   showDetail(s);
 }
 
@@ -979,6 +1120,29 @@ function pointInPolygon(point, polygon) {
 // Re-filter when slider changes (no new network request needed)
 slider.addEventListener('change', renderFiltered);
 priceExact.addEventListener('change', renderFiltered);
+
+// ── EXTRA FILTER CONTROLS ──
+document.getElementById('requireKwh').addEventListener('change', function() {
+  requireKwhPrice = this.checked;
+  renderFiltered();
+});
+
+document.getElementById('filterParking').addEventListener('change', function() {
+  filterParkingEnabled = this.checked;
+  document.getElementById('parkMin').disabled = !this.checked;
+  document.getElementById('parkMax').disabled = !this.checked;
+  renderFiltered();
+});
+
+document.getElementById('parkMin').addEventListener('input', function() {
+  parkMin = this.value !== '' ? parseFloat(this.value) : null;
+  renderFiltered();
+});
+
+document.getElementById('parkMax').addEventListener('input', function() {
+  parkMax = this.value !== '' ? parseFloat(this.value) : null;
+  renderFiltered();
+});
 
 document.getElementById('searchBtn').addEventListener('click', doSearch);
 document.getElementById('locationInput').addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
