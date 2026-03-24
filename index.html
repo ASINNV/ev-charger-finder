@@ -536,20 +536,21 @@ async function geocode(query) {
   return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
 }
 
-// ── FETCH CHARGERS from Open Charge Map ──
+// ── FETCH CHARGERS from NREL AFDC (no CORS issues, free DEMO_KEY) ──
 async function fetchChargers(lat, lng, radiusMiles) {
-  const radiusKm = radiusMiles * 1.60934;
-  const url = `https://ev-ocm-proxy.adrianrsinnott.workers.dev/?output=json&key=7a9d9862-1ec6-4c47-bb68-060d896311cb&latitude=${lat}&longitude=${lng}&distance=${radiusKm}&distanceunit=KM&maxresults=200&compact=true&verbose=false`;
+  const url = `https://developer.nrel.gov/api/alt-fuel-stations/v1.json?api_key=DEMO_KEY&fuel_type=ELEC&latitude=${lat}&longitude=${lng}&radius=${radiusMiles}&limit=200&status=E`;
   const res = await fetch(url);
   const text = await res.text();
-  if (!res.ok) throw new Error('OCM error ' + res.status + ': ' + text.slice(0, 120));
-  try { return JSON.parse(text); } catch(e) { throw new Error('Bad response: ' + text.slice(0, 120)); }
-
+  if (!res.ok) throw new Error('NREL error ' + res.status + ': ' + text.slice(0, 120));
+  try {
+    const data = JSON.parse(text);
+    return data.fuel_stations || [];
+  } catch(e) { throw new Error('Bad response: ' + text.slice(0, 120)); }
 }
 
-// ── PARSE PRICE from OCM data ──
+// ── PARSE PRICE from NREL data ──
 function parsePrice(station) {
-  const costStr = station.UsageCost || '';
+  const costStr = station.ev_pricing || '';
   if (!costStr || costStr.trim() === '') return null;
 
   const lower = costStr.toLowerCase().trim();
@@ -574,18 +575,18 @@ function parsePrice(station) {
   return 'text';
 }
 
-// ── OCM field helpers ──
-function stationNetwork(s) { return s.OperatorInfo?.Title || 'Unknown'; }
-function stationName(s)    { return s.AddressInfo?.Title || 'Unknown Station'; }
-function stationAddr(s)    { return [s.AddressInfo?.AddressLine1, s.AddressInfo?.Town, s.AddressInfo?.StateOrProvince].filter(Boolean).join(', '); }
-function stationLat(s)     { return s.AddressInfo?.Latitude; }
-function stationLng(s)     { return s.AddressInfo?.Longitude; }
-function stationId(s)      { return s.ID; }
-function stationPorts(s)   { return s.Connections?.length || 0; }
-function stationConnectors(s) { return (s.Connections || []).map(c => c.ConnectionType?.Title || 'Unknown').filter((v,i,a) => a.indexOf(v)===i).join(', ') || '—'; }
-function stationAccess(s)  { return s.UsageType?.Title || 'Unknown'; }
-function stationPhone(s)   { return s.AddressInfo?.ContactTelephone1 || '—'; }
-function stationHours(s)   { return s.AddressInfo?.AccessComments || '—'; }
+// ── NREL field helpers ──
+function stationNetwork(s) { return s.ev_network || 'Unknown'; }
+function stationName(s)    { return s.station_name || 'Unknown Station'; }
+function stationAddr(s)    { return [s.street_address, s.city, s.state].filter(Boolean).join(', '); }
+function stationLat(s)     { return s.latitude; }
+function stationLng(s)     { return s.longitude; }
+function stationId(s)      { return s.id; }
+function stationPorts(s)   { return (s.ev_level1_evse_num||0) + (s.ev_level2_evse_num||0) + (s.ev_dc_fast_num||0); }
+function stationConnectors(s) { return (s.ev_connector_types || []).join(', ') || '—'; }
+function stationAccess(s)  { return s.access_code === 'public' ? 'Public' : s.access_code === 'private' ? 'Private' : 'Unknown'; }
+function stationPhone(s)   { return s.station_phone || '—'; }
+function stationHours(s)   { return s.access_days_time || '—'; }
 
 // ── BUILD NETWORK LIST ──
 function buildNetworkFilter(stations) {
@@ -673,7 +674,7 @@ function renderList(stations) {
     let priceTag = '';
     if (price === 0) priceTag = `<span class="tag free">FREE</span>`;
     else if (typeof price === 'number') priceTag = `<span class="tag price">${price.toFixed(1)}¢/kWh</span>`;
-    else if (price === 'text') priceTag = `<span class="tag unknown" title="${escHtml(s.UsageCost||'')}">PRICE: SEE DESC</span>`;
+    else if (price === 'text') priceTag = `<span class="tag unknown" title="${escHtml(s.ev_pricing||'')}">PRICE: SEE DESC</span>`;
     else priceTag = `<span class="tag unknown">PRICE UNKNOWN</span>`;
 
     const card = document.createElement('div');
@@ -741,7 +742,7 @@ function showDetail(s) {
   panel.classList.add('visible');
 
   const price = parsePrice(s);
-  const priceStr = price === 0 ? 'FREE' : typeof price === 'number' ? `${price.toFixed(2)}¢/kWh` : s.UsageCost || 'Not reported';
+  const priceStr = price === 0 ? 'FREE' : typeof price === 'number' ? `${price.toFixed(2)}¢/kWh` : s.ev_pricing || 'Not reported';
   const l1 = s.ev_level1_evse_num || 0, l2 = s.ev_level2_evse_num || 0, dc = s.ev_dc_fast_num || 0;
 
   content.innerHTML = `
@@ -771,7 +772,7 @@ async function doSearch() {
 
   setStatus('loading', '⠋ Searching...');
   document.getElementById('searchBtn').disabled = true;
-  document.getElementById('chargerList').innerHTML = `<div class="empty-state"><div class="empty-icon"><span class="spinner"></span></div><div class="empty-title">Searching...</div><div class="empty-sub">Fetching charger data from Open Charge Map.</div></div>`;
+  document.getElementById('chargerList').innerHTML = `<div class="empty-state"><div class="empty-icon"><span class="spinner"></span></div><div class="empty-title">Searching...</div><div class="empty-sub">Fetching charger data from NREL AFDC.</div></div>`;
   document.getElementById('countBadge').textContent = '…';
   markers.forEach(m => map.removeLayer(m));
   markers = [];
