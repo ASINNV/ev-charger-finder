@@ -1,0 +1,848 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EVPRICE — Find Cheap EV Charging</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@700;800&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  :root {
+    --bg: #0a0f0a;
+    --surface: #111811;
+    --surface2: #182018;
+    --border: #1e2e1e;
+    --accent: #4eff7a;
+    --accent-dim: #2ab84e;
+    --accent-glow: rgba(78,255,122,0.15);
+    --warn: #ffcc44;
+    --muted: #4a6b4a;
+    --text: #d4e8d4;
+    --text-dim: #6b8a6b;
+    --danger: #ff5555;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'DM Sans', sans-serif;
+    height: 100vh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* ── HEADER ── */
+  header {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    padding: 12px 20px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    z-index: 1000;
+  }
+
+  .logo {
+    font-family: 'Syne', sans-serif;
+    font-weight: 800;
+    font-size: 1.3rem;
+    letter-spacing: -0.02em;
+    color: var(--accent);
+  }
+  .logo span { color: var(--text-dim); }
+
+  .controls {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex: 1;
+    flex-wrap: wrap;
+  }
+
+  .control-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 6px 12px;
+  }
+
+  .control-group label {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.7rem;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    white-space: nowrap;
+  }
+
+  .control-group input[type="text"],
+  .control-group input[type="number"],
+  .control-group select {
+    background: transparent;
+    border: none;
+    color: var(--text);
+    font-family: 'DM Mono', monospace;
+    font-size: 0.85rem;
+    outline: none;
+    width: 120px;
+  }
+
+  .control-group input[type="number"] { width: 70px; }
+
+  .price-slider-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .price-label-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .price-value {
+    font-family: 'Syne', sans-serif;
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: var(--accent);
+  }
+
+  input[type="range"] {
+    -webkit-appearance: none;
+    width: 180px;
+    height: 4px;
+    background: var(--border);
+    border-radius: 2px;
+    outline: none;
+  }
+
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--accent);
+    cursor: pointer;
+    box-shadow: 0 0 8px var(--accent-glow);
+  }
+
+  .btn {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.8rem;
+    font-weight: 500;
+    padding: 8px 18px;
+    border-radius: 8px;
+    border: none;
+    cursor: pointer;
+    transition: all 0.15s;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+
+  .btn-primary {
+    background: var(--accent);
+    color: #0a0f0a;
+  }
+  .btn-primary:hover { background: #6fff94; box-shadow: 0 0 16px var(--accent-glow); }
+  .btn-primary:disabled { background: var(--muted); color: var(--bg); cursor: not-allowed; }
+
+  .btn-secondary {
+    background: transparent;
+    color: var(--text-dim);
+    border: 1px solid var(--border);
+  }
+  .btn-secondary:hover { border-color: var(--accent); color: var(--accent); }
+
+  .status-pill {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.7rem;
+    padding: 4px 10px;
+    border-radius: 20px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    white-space: nowrap;
+    margin-left: auto;
+  }
+  .status-pill.loading { border-color: var(--warn); color: var(--warn); }
+  .status-pill.success { border-color: var(--accent); color: var(--accent); }
+  .status-pill.error { border-color: var(--danger); color: var(--danger); }
+
+  /* ── MAIN LAYOUT ── */
+  .main {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  /* ── SIDEBAR ── */
+  .sidebar {
+    width: 340px;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    flex-shrink: 0;
+  }
+
+  .sidebar-header {
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--border);
+    font-family: 'DM Mono', monospace;
+    font-size: 0.7rem;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .count-badge {
+    font-family: 'Syne', sans-serif;
+    font-weight: 700;
+    color: var(--accent);
+    font-size: 0.85rem;
+  }
+
+  .charger-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px;
+  }
+
+  .charger-list::-webkit-scrollbar { width: 4px; }
+  .charger-list::-webkit-scrollbar-track { background: transparent; }
+  .charger-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  .charger-card {
+    padding: 12px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    margin-bottom: 6px;
+    cursor: pointer;
+    transition: all 0.15s;
+    background: var(--surface2);
+  }
+  .charger-card:hover { border-color: var(--accent-dim); background: rgba(78,255,122,0.04); }
+  .charger-card.active { border-color: var(--accent); background: var(--accent-glow); }
+
+  .charger-name {
+    font-weight: 500;
+    font-size: 0.85rem;
+    margin-bottom: 4px;
+    color: var(--text);
+    line-height: 1.3;
+  }
+
+  .charger-addr {
+    font-size: 0.72rem;
+    color: var(--text-dim);
+    margin-bottom: 8px;
+    line-height: 1.4;
+  }
+
+  .charger-meta {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+
+  .tag {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.65rem;
+    padding: 2px 8px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+  }
+
+  .tag.price { border-color: var(--accent-dim); color: var(--accent); background: rgba(78,255,122,0.06); }
+  .tag.free { border-color: #44aaff; color: #44aaff; background: rgba(68,170,255,0.06); }
+  .tag.unknown { border-color: var(--muted); color: var(--muted); }
+  .tag.network { border-color: #9966ff; color: #9966ff; background: rgba(153,102,255,0.06); }
+  .tag.ports { border-color: var(--border); }
+  .tag.status-op { border-color: var(--accent-dim); color: var(--accent-dim); }
+  .tag.status-un { border-color: var(--muted); }
+
+  .empty-state {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 40px 20px;
+    text-align: center;
+    gap: 12px;
+  }
+
+  .empty-icon {
+    font-size: 2.5rem;
+    opacity: 0.3;
+  }
+
+  .empty-title {
+    font-family: 'Syne', sans-serif;
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--text-dim);
+  }
+
+  .empty-sub {
+    font-size: 0.78rem;
+    color: var(--muted);
+    line-height: 1.5;
+  }
+
+  /* ── MAP ── */
+  #map {
+    flex: 1;
+    background: #0a0f0a;
+  }
+
+  /* Leaflet dark overrides */
+  .leaflet-tile { filter: brightness(0.6) saturate(0.4) hue-rotate(120deg); }
+  .leaflet-control-zoom a {
+    background: var(--surface2) !important;
+    color: var(--text) !important;
+    border-color: var(--border) !important;
+  }
+  .leaflet-control-zoom a:hover { background: var(--surface) !important; color: var(--accent) !important; }
+  .leaflet-popup-content-wrapper {
+    background: var(--surface) !important;
+    color: var(--text) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 10px !important;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.6) !important;
+  }
+  .leaflet-popup-tip { background: var(--surface) !important; }
+  .leaflet-popup-content { font-family: 'DM Sans', sans-serif; font-size: 0.82rem; line-height: 1.6; }
+
+  /* ── PRICE BREAKDOWN NOTICE ── */
+  .price-note {
+    padding: 10px 16px;
+    background: rgba(255,204,68,0.06);
+    border-top: 1px solid rgba(255,204,68,0.2);
+    font-size: 0.7rem;
+    color: #cc9900;
+    font-family: 'DM Mono', monospace;
+    line-height: 1.5;
+  }
+
+  /* ── DETAIL PANEL ── */
+  .detail-panel {
+    position: absolute;
+    bottom: 20px;
+    right: 20px;
+    width: 300px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px;
+    z-index: 800;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+    display: none;
+  }
+
+  .detail-panel.visible { display: block; }
+  .detail-title {
+    font-family: 'Syne', sans-serif;
+    font-weight: 700;
+    font-size: 0.95rem;
+    margin-bottom: 4px;
+    color: var(--text);
+  }
+  .detail-close {
+    position: absolute;
+    top: 12px; right: 12px;
+    background: none; border: none;
+    color: var(--text-dim); cursor: pointer; font-size: 1rem;
+  }
+  .detail-close:hover { color: var(--text); }
+  .detail-body { font-size: 0.78rem; color: var(--text-dim); line-height: 1.7; }
+  .detail-price { font-family: 'Syne', sans-serif; font-size: 1.5rem; font-weight: 800; color: var(--accent); margin: 8px 0; }
+  .detail-row { display: flex; justify-content: space-between; border-bottom: 1px solid var(--border); padding: 4px 0; }
+  .detail-row:last-child { border-bottom: none; }
+  .detail-key { color: var(--muted); font-family: 'DM Mono', monospace; font-size: 0.68rem; }
+  .detail-val { color: var(--text); font-size: 0.75rem; text-align: right; max-width: 160px; }
+
+  .spinner {
+    display: inline-block;
+    width: 12px; height: 12px;
+    border: 2px solid var(--border);
+    border-top-color: var(--warn);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    margin-right: 6px;
+    vertical-align: middle;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .network-filter {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+    padding: 8px 8px 0;
+  }
+
+  .net-chip {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.62rem;
+    padding: 2px 8px;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    cursor: pointer;
+    transition: all 0.15s;
+    background: var(--surface2);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .net-chip.active { border-color: var(--accent); color: var(--accent); background: var(--accent-glow); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">EV<span>PRICE</span></div>
+  <div class="controls">
+    <div class="control-group">
+      <label>Location</label>
+      <input type="text" id="locationInput" placeholder="City, ZIP, or address" value="Ukiah, CA"/>
+    </div>
+    <div class="control-group">
+      <label>Radius</label>
+      <select id="radiusSelect">
+        <option value="5">5 mi</option>
+        <option value="10" selected>10 mi</option>
+        <option value="25">25 mi</option>
+        <option value="50">50 mi</option>
+      </select>
+    </div>
+    <div class="control-group" style="flex-direction:column;align-items:flex-start;gap:4px;">
+      <div class="price-label-row" style="width:100%;gap:10px;">
+        <label>Max Price</label>
+        <span class="price-value" id="priceDisplay">¢/kWh</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <input type="range" id="priceSlider" min="0" max="99" step="1" value="40">
+        <input type="number" id="priceExact" min="0" max="999" step="0.1" style="width:55px;font-size:0.8rem;" placeholder="¢">
+      </div>
+    </div>
+    <button class="btn btn-primary" id="searchBtn">Search</button>
+    <button class="btn btn-secondary" id="locateBtn">📍 My Location</button>
+  </div>
+  <div class="status-pill" id="statusPill">Ready</div>
+</header>
+
+<div class="main">
+  <div class="sidebar">
+    <div class="sidebar-header">
+      <span>Chargers Found</span>
+      <span class="count-badge" id="countBadge">—</span>
+    </div>
+    <div class="network-filter" id="networkFilter"></div>
+    <div class="charger-list" id="chargerList">
+      <div class="empty-state">
+        <div class="empty-icon">⚡</div>
+        <div class="empty-title">No search yet</div>
+        <div class="empty-sub">Enter a location and set your max price per kWh to find affordable chargers near you.</div>
+      </div>
+    </div>
+    <div class="price-note">
+      ⚠ Pricing sourced from Open Charge Map community data. Not all stations report per-kWh rates — "unknown" stations are shown separately. Always verify current prices at the charger.
+    </div>
+  </div>
+  <div id="map"></div>
+</div>
+
+<div class="detail-panel" id="detailPanel">
+  <button class="detail-close" id="detailClose">✕</button>
+  <div id="detailContent"></div>
+</div>
+
+<script>
+// ── STATE ──
+let map, markers = [], allResults = [], filteredResults = [];
+let activeCard = null;
+let maxCents = 40;
+let selectedNetworks = new Set();
+
+// ── MAP INIT ──
+map = L.map('map', { zoomControl: true }).setView([39.15, -123.21], 12);
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+  attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors © <a href="https://carto.com/">CARTO</a>',
+  subdomains: 'abcd',
+  maxZoom: 19
+}).addTo(map);
+
+// ── CUSTOM MARKERS ──
+function makeIcon(color, size = 28) {
+  const svg = `<svg width="${size}" height="${size*1.3}" viewBox="0 0 28 36" xmlns="http://www.w3.org/2000/svg">
+    <path d="M14 0C6.27 0 0 6.27 0 14c0 9.33 14 22 14 22S28 23.33 28 14C28 6.27 21.73 0 14 0z" fill="${color}" opacity="0.95"/>
+    <circle cx="14" cy="14" r="6" fill="white" opacity="0.9"/>
+    <text x="14" y="18" text-anchor="middle" font-size="9" font-family="monospace" fill="${color}" font-weight="bold">⚡</text>
+  </svg>`;
+  return L.divIcon({
+    html: svg,
+    className: '',
+    iconSize: [size, size*1.3],
+    iconAnchor: [size/2, size*1.3],
+    popupAnchor: [0, -size*1.3]
+  });
+}
+
+const iconGreen  = makeIcon('#4eff7a');
+const iconBlue   = makeIcon('#44aaff');
+const iconGray   = makeIcon('#4a6b4a');
+const iconYellow = makeIcon('#ffcc44');
+
+// ── PRICE SLIDER ──
+const slider = document.getElementById('priceSlider');
+const priceExact = document.getElementById('priceExact');
+const priceDisplay = document.getElementById('priceDisplay');
+
+function updatePriceDisplay(val) {
+  maxCents = parseFloat(val);
+  if (isNaN(maxCents)) maxCents = 99;
+  const cents = Math.floor(maxCents);
+  const frac = Math.round((maxCents - cents) * 10);
+  priceDisplay.textContent = `${cents}.${frac}¢/kWh`;
+  slider.value = Math.min(99, Math.floor(maxCents));
+  priceExact.value = maxCents;
+}
+
+slider.addEventListener('input', () => updatePriceDisplay(slider.value));
+priceExact.addEventListener('input', () => updatePriceDisplay(priceExact.value));
+updatePriceDisplay(40);
+
+// ── GEOCODE ──
+async function geocode(query) {
+  const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=1`;
+  const res = await fetch(url, { headers: { 'Accept-Language': 'en' }, referrerPolicy: 'no-referrer' });
+  const data = await res.json();
+  if (!data.length) throw new Error('Location not found');
+  return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
+}
+
+// ── FETCH CHARGERS from Open Charge Map ──
+async function fetchChargers(lat, lng, radiusMiles) {
+  const radiusKm = radiusMiles * 1.60934;
+  const url = `https://api.openchargemap.io/v3/poi/?output=json&key=7a9d9862-1ec6-4c47-bb68-060d896311cb&latitude=${lat}&longitude=${lng}&distance=${radiusKm}&distanceunit=KM&maxresults=200&compact=true&verbose=false`;
+  const res = await fetch(url, { referrerPolicy: 'no-referrer' });
+  if (!res.ok) throw new Error('API error: ' + res.status);
+  return await res.json();
+}
+
+// ── PARSE PRICE from OCM data ──
+function parsePrice(station) {
+  const costStr = station.UsageCost || '';
+  if (!costStr || costStr.trim() === '') return null;
+
+  const lower = costStr.toLowerCase().trim();
+  if (lower === 'free' || lower.includes('no charge') || lower.includes('no cost') ||
+      lower.includes('free to use') || lower === '$0' || lower === '0') return 0;
+
+  const patterns = [
+    /\$\s*([\d.]+)\s*(?:\/|\s*per\s*)?\s*k[w]?h/i,
+    /([\d.]+)\s*¢\s*(?:\/|\s*per\s*)?\s*k[w]?h/i,
+    /([\d.]+)\s*cents?\s*(?:\/|\s*per\s*)?\s*k[w]?h/i,
+    /([\d.]+)\s*(?:\/|\s*per\s*)\s*k[w]?h/i,
+  ];
+
+  for (const pat of patterns) {
+    const m = costStr.match(pat);
+    if (m) {
+      let val = parseFloat(m[1]);
+      if (pat.source.startsWith('\\$')) val = val * 100;
+      if (val >= 0 && val < 300) return val;
+    }
+  }
+  return 'text';
+}
+
+// ── OCM field helpers ──
+function stationNetwork(s) { return s.OperatorInfo?.Title || 'Unknown'; }
+function stationName(s)    { return s.AddressInfo?.Title || 'Unknown Station'; }
+function stationAddr(s)    { return [s.AddressInfo?.AddressLine1, s.AddressInfo?.Town, s.AddressInfo?.StateOrProvince].filter(Boolean).join(', '); }
+function stationLat(s)     { return s.AddressInfo?.Latitude; }
+function stationLng(s)     { return s.AddressInfo?.Longitude; }
+function stationId(s)      { return s.ID; }
+function stationPorts(s)   { return s.Connections?.length || 0; }
+function stationConnectors(s) { return (s.Connections || []).map(c => c.ConnectionType?.Title || 'Unknown').filter((v,i,a) => a.indexOf(v)===i).join(', ') || '—'; }
+function stationAccess(s)  { return s.UsageType?.Title || 'Unknown'; }
+function stationPhone(s)   { return s.AddressInfo?.ContactTelephone1 || '—'; }
+function stationHours(s)   { return s.AddressInfo?.AccessComments || '—'; }
+
+// ── BUILD NETWORK LIST ──
+function buildNetworkFilter(stations) {
+  const nets = new Set();
+  stations.forEach(s => nets.add(stationNetwork(s)));
+  selectedNetworks = new Set(nets);
+
+  const container = document.getElementById('networkFilter');
+  if (nets.size <= 1) { container.innerHTML = ''; return; }
+
+  container.innerHTML = '';
+  const allChip = document.createElement('div');
+  allChip.className = 'net-chip active';
+  allChip.textContent = 'All';
+  allChip.dataset.net = '__all__';
+  container.appendChild(allChip);
+
+  [...nets].sort().forEach(n => {
+    const chip = document.createElement('div');
+    chip.className = 'net-chip active';
+    chip.textContent = n.length > 18 ? n.slice(0,16)+'…' : n;
+    chip.title = n;
+    chip.dataset.net = n;
+    container.appendChild(chip);
+  });
+
+  container.addEventListener('click', e => {
+    const chip = e.target.closest('.net-chip');
+    if (!chip) return;
+    if (chip.dataset.net === '__all__') {
+      const anyInactive = [...container.querySelectorAll('.net-chip:not([data-net="__all__"])')].some(c => !c.classList.contains('active'));
+      container.querySelectorAll('.net-chip').forEach(c => {
+        if (anyInactive) { c.classList.add('active'); selectedNetworks.add(c.dataset.net); }
+        else { c.classList.remove('active'); selectedNetworks.delete(c.dataset.net); }
+      });
+      if (anyInactive) { [...nets].forEach(n => selectedNetworks.add(n)); }
+      else { selectedNetworks.clear(); }
+    } else {
+      chip.classList.toggle('active');
+      if (chip.classList.contains('active')) selectedNetworks.add(chip.dataset.net);
+      else selectedNetworks.delete(chip.dataset.net);
+    }
+    renderFiltered();
+  });
+}
+
+// ── FILTER + RENDER ──
+function renderFiltered() {
+  filteredResults = allResults.filter(s => {
+    if (!selectedNetworks.has(stationNetwork(s))) return false;
+    const price = parsePrice(s);
+    if (price === null || price === 'text') return true;
+    return price <= maxCents;
+  });
+
+  document.getElementById('countBadge').textContent = filteredResults.length;
+  renderList(filteredResults);
+  renderMarkers(filteredResults);
+}
+
+// ── RENDER LIST ──
+function renderList(stations) {
+  const list = document.getElementById('chargerList');
+  if (!stations.length) {
+    list.innerHTML = `<div class="empty-state">
+      <div class="empty-icon">🔍</div>
+      <div class="empty-title">No matches</div>
+      <div class="empty-sub">Try raising your max price or increasing the search radius.</div>
+    </div>`;
+    return;
+  }
+
+  const sorted = [...stations].sort((a, b) => {
+    const pa = parsePrice(a), pb = parsePrice(b);
+    const va = (pa === null || pa === 'text') ? 999 : pa;
+    const vb = (pb === null || pb === 'text') ? 999 : pb;
+    return va - vb;
+  });
+
+  list.innerHTML = '';
+  sorted.forEach(s => {
+    const price = parsePrice(s);
+    const ports = stationPorts(s);
+
+    let priceTag = '';
+    if (price === 0) priceTag = `<span class="tag free">FREE</span>`;
+    else if (typeof price === 'number') priceTag = `<span class="tag price">${price.toFixed(1)}¢/kWh</span>`;
+    else if (price === 'text') priceTag = `<span class="tag unknown" title="${escHtml(s.UsageCost||'')}">PRICE: SEE DESC</span>`;
+    else priceTag = `<span class="tag unknown">PRICE UNKNOWN</span>`;
+
+    const card = document.createElement('div');
+    card.className = 'charger-card';
+    card.dataset.id = stationId(s);
+    card.innerHTML = `
+      <div class="charger-name">${escHtml(stationName(s))}</div>
+      <div class="charger-addr">${escHtml(stationAddr(s))}</div>
+      <div class="charger-meta">
+        ${priceTag}
+        <span class="tag network">${escHtml(stationNetwork(s).slice(0,22))}</span>
+        <span class="tag ports">${ports} port${ports !== 1 ? 's' : ''}</span>
+        <span class="tag status-op">${escHtml(stationAccess(s))}</span>
+      </div>
+    `;
+    card.addEventListener('click', () => selectStation(s, card));
+    list.appendChild(card);
+  });
+}
+
+// ── RENDER MARKERS ──
+function renderMarkers(stations) {
+  markers.forEach(m => map.removeLayer(m));
+  markers = [];
+
+  stations.forEach(s => {
+    const lat = stationLat(s), lng = stationLng(s);
+    if (!lat || !lng) return;
+
+    const price = parsePrice(s);
+    let icon;
+    if (price === 0) icon = iconBlue;
+    else if (typeof price === 'number') icon = iconGreen;
+    else if (price === 'text') icon = iconYellow;
+    else icon = iconGray;
+
+    const priceStr = price === 0 ? 'FREE' : typeof price === 'number' ? `${price.toFixed(1)}¢/kWh` : 'Price unknown';
+
+    const marker = L.marker([lat, lng], { icon })
+      .addTo(map)
+      .bindPopup(`<b>${escHtml(stationName(s))}</b><br><span style="color:var(--accent);font-weight:600;">${priceStr}</span><br><small>${escHtml(stationNetwork(s))}</small>`);
+
+    marker.on('click', () => {
+      const card = document.querySelector(`.charger-card[data-id="${stationId(s)}"]`);
+      selectStation(s, card);
+    });
+
+    markers.push(marker);
+  });
+}
+
+// ── SELECT STATION ──
+function selectStation(s, card) {
+  document.querySelectorAll('.charger-card').forEach(c => c.classList.remove('active'));
+  if (card) { card.classList.add('active'); card.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }
+  const lat = stationLat(s), lng = stationLng(s);
+  if (lat && lng) map.setView([lat, lng], 16);
+  showDetail(s);
+}
+
+// ── DETAIL PANEL ──
+function showDetail(s) {
+  const panel = document.getElementById('detailPanel');
+  const content = document.getElementById('detailContent');
+  panel.classList.add('visible');
+
+  const price = parsePrice(s);
+  const priceStr = price === 0 ? 'FREE' : typeof price === 'number' ? `${price.toFixed(2)}¢/kWh` : s.UsageCost || 'Not reported';
+  const l1 = s.ev_level1_evse_num || 0, l2 = s.ev_level2_evse_num || 0, dc = s.ev_dc_fast_num || 0;
+
+  content.innerHTML = `
+    <div class="detail-title">${escHtml(stationName(s))}</div>
+    <div class="detail-price">${escHtml(priceStr)}</div>
+    <div class="detail-body">
+      <div class="detail-row"><span class="detail-key">NETWORK</span><span class="detail-val">${escHtml(stationNetwork(s))}</span></div>
+      <div class="detail-row"><span class="detail-key">ADDRESS</span><span class="detail-val">${escHtml(stationAddr(s))}</span></div>
+      <div class="detail-row"><span class="detail-key">CONNECTORS</span><span class="detail-val">${escHtml(stationConnectors(s))}</span></div>
+      <div class="detail-row"><span class="detail-key">PORTS</span><span class="detail-val">L1: ${l1} · L2: ${l2} · DCFC: ${dc}</span></div>
+      <div class="detail-row"><span class="detail-key">ACCESS</span><span class="detail-val">${escHtml(stationAccess(s))}</span></div>
+      <div class="detail-row"><span class="detail-key">HOURS</span><span class="detail-val">${escHtml(stationHours(s))}</span></div>
+      <div class="detail-row"><span class="detail-key">PHONE</span><span class="detail-val">${escHtml(stationPhone(s))}</span></div>
+    </div>
+  `;
+}
+
+document.getElementById('detailClose').addEventListener('click', () => {
+  document.getElementById('detailPanel').classList.remove('visible');
+});
+
+// ── SEARCH ──
+async function doSearch() {
+  const locationVal = document.getElementById('locationInput').value.trim();
+  const radiusMiles = parseInt(document.getElementById('radiusSelect').value);
+  if (!locationVal) { alert('Please enter a location.'); return; }
+
+  setStatus('loading', '⠋ Searching...');
+  document.getElementById('searchBtn').disabled = true;
+  document.getElementById('chargerList').innerHTML = `<div class="empty-state"><div class="empty-icon"><span class="spinner"></span></div><div class="empty-title">Searching...</div><div class="empty-sub">Fetching charger data from Open Charge Map.</div></div>`;
+  document.getElementById('countBadge').textContent = '…';
+  markers.forEach(m => map.removeLayer(m));
+  markers = [];
+
+  try {
+    const { lat, lng } = await geocode(locationVal);
+    map.setView([lat, lng], 12);
+
+    L.circle([lat, lng], { radius: radiusMiles * 1609, color: '#4eff7a', fillColor: '#4eff7a', fillOpacity: 0.04, weight: 1 }).addTo(map);
+
+    setStatus('loading', '⠋ Fetching chargers...');
+    allResults = await fetchChargers(lat, lng, radiusMiles);
+
+    if (!allResults.length) {
+      setStatus('error', '0 found');
+      document.getElementById('chargerList').innerHTML = `<div class="empty-state"><div class="empty-icon">😶</div><div class="empty-title">No chargers found</div><div class="empty-sub">Try a wider radius or different location.</div></div>`;
+      document.getElementById('countBadge').textContent = '0';
+      return;
+    }
+
+    buildNetworkFilter(allResults);
+    renderFiltered();
+    setStatus('success', `${allResults.length} found`);
+
+  } catch(e) {
+    setStatus('error', 'Error: ' + (e.message || 'unknown'));
+    document.getElementById('chargerList').innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><div class="empty-title">Error</div><div class="empty-sub">${escHtml(e.message)}</div></div>`;
+  } finally {
+    document.getElementById('searchBtn').disabled = false;
+  }
+}
+
+// Re-filter when slider changes (no new network request needed)
+slider.addEventListener('change', renderFiltered);
+priceExact.addEventListener('change', renderFiltered);
+
+document.getElementById('searchBtn').addEventListener('click', doSearch);
+document.getElementById('locationInput').addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
+
+// ── LOCATE ME ──
+document.getElementById('locateBtn').addEventListener('click', () => {
+  if (!navigator.geolocation) { alert('Geolocation not supported.'); return; }
+  setStatus('loading', '⠋ Locating...');
+  navigator.geolocation.getCurrentPosition(
+    pos => {
+      const { latitude: lat, longitude: lng } = pos.coords;
+      // Reverse geocode to fill in location field
+      fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}`, { referrerPolicy: 'no-referrer' })
+        .then(r => r.json())
+        .then(data => {
+          document.getElementById('locationInput').value = data.display_name?.split(',').slice(0,3).join(',') || `${lat},${lng}`;
+          doSearch();
+        })
+        .catch(() => {
+          document.getElementById('locationInput').value = `${lat.toFixed(4)},${lng.toFixed(4)}`;
+          doSearch();
+        });
+    },
+    err => setStatus('error', 'Location denied')
+  );
+});
+
+// ── HELPERS ──
+function setStatus(type, msg) {
+  const pill = document.getElementById('statusPill');
+  pill.className = 'status-pill ' + type;
+  pill.innerHTML = (type === 'loading' ? '<span class="spinner"></span>' : '') + msg;
+}
+
+function escHtml(str) {
+  if (!str) return '';
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+</script>
+</body>
+</html>
