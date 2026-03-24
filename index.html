@@ -540,9 +540,11 @@ async function geocode(query) {
 async function fetchChargers(lat, lng, radiusMiles) {
   const radiusKm = radiusMiles * 1.60934;
   const url = `https://ev-ocm-proxy.adrianrsinnott.workers.dev/?output=json&key=7a9d9862-1ec6-4c47-bb68-060d896311cb&latitude=${lat}&longitude=${lng}&distance=${radiusKm}&distanceunit=KM&maxresults=200&compact=true&verbose=false`;
-  const res = await fetch(url, { referrerPolicy: 'no-referrer' });
-  if (!res.ok) throw new Error('API error: ' + res.status);
-  return await res.json();
+  const res = await fetch(url);
+  const text = await res.text();
+  if (!res.ok) throw new Error('OCM error ' + res.status + ': ' + text.slice(0, 120));
+  try { return JSON.parse(text); } catch(e) { throw new Error('Bad response: ' + text.slice(0, 120)); }
+
 }
 
 // ── PARSE PRICE from OCM data ──
